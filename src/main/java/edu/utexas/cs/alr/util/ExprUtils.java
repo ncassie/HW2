@@ -144,22 +144,14 @@ public class ExprUtils
                     break;
                 case VAR:
                     long varId = ((VarExpr) e).getId();
-                    if (!literals.contains(-varId))
-                    {
-                        literals.add(varId);
-                        vars.add(varId);
-                    }
-                    else literals.remove(-varId);
+                    literals.add(varId);
+                    vars.add(varId);
                     break;
                 case NEG:
                     NegExpr neg = (NegExpr) e;
                     long litId = -((VarExpr)neg.getExpr()).getId();
-                    if (!literals.contains(-litId))
-                    {
-                        literals.add(litId);
-                        vars.add(-litId);
-                    }
-                    else literals.remove(-litId);
+                    literals.add(litId);
+                    vars.add(-litId);
                     break;
                 default:
                     assert false;
