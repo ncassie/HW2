@@ -1,4 +1,4 @@
-# DPLL SAT solver.
+# CDCL SAT solver.
 
 This repository contains the framework you must extend to solve
 homework 2. In the following sections, we describe how you can build
