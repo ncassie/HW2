@@ -19,7 +19,104 @@ public class ExprUtils
 {
     public static Expr toCNF(Expr expr)
     {
+        Expr x = toNNF(expr);
+        System.out.println("AFTER NNF TRANSFORM");
+        System.out.println(x);
+
         throw new UnsupportedOperationException("implement this");
+    }
+
+    public static Expr toNNF(Expr expr) {
+
+        Expr.ExprKind ek = expr.getKind();
+        switch (ek)
+        {
+            case VAR:
+                return expr;
+            case NEG:
+                // cast for testing and development - maybe push down
+                NegExpr nexpr = (NegExpr) expr;
+
+                Expr.ExprKind ek2 = nexpr.getExpr().getKind();
+                switch (ek2)
+                {
+                    case VAR:
+                        return expr;
+                    case NEG:
+                        // NEED TO TEST THIS (DOUBLE NEGATIVE)
+                        return nexpr.getExpr();
+                    case AND:
+                        Expr left = ((AndExpr) nexpr.getExpr()).getLeft();
+                        NegExpr negLeft = mkNEG(left);
+                        Expr NNFleft = toNNF(negLeft);
+                        Expr right = ((AndExpr) nexpr.getExpr()).getRight();
+                        NegExpr negRight = mkNEG(right);
+                        Expr NNFright = toNNF(negRight);
+                        return mkOR(NNFleft, NNFright);
+                    case OR:
+                        Expr left2 = ((OrExpr) nexpr.getExpr()).getLeft();
+                        NegExpr negLeft2 = mkNEG(left2);
+                        Expr NNFleft2 = toNNF(negLeft2);
+                        Expr right2 = ((OrExpr) nexpr.getExpr()).getRight();
+                        NegExpr negRight2 = mkNEG(right2);
+                        Expr NNFright2 = toNNF(negRight2);
+                        return mkAND(NNFleft2, NNFright2);
+                    case IMPL:
+                    case EQUIV:
+                        //FOR IMPLICATION AND EQUIVALENCE
+                        // first do nnf, then apply negative
+                        // then do nnf again?
+                        Expr e = nexpr.getExpr();
+                        e = toNNF(e);
+                        NegExpr ne = mkNEG(e);
+                        return toNNF(ne);
+                }
+                break;
+
+            case AND:
+                // recurse on left and right sides
+                System.out.println(expr.getKind());
+                System.out.println(ek);
+                Expr left = toNNF(((AndExpr) expr).getLeft());
+                Expr right = toNNF(((AndExpr) expr).getRight());
+                // return AND of NNF'd left and right sides
+                return mkAND(left, right);
+
+            case OR:
+                // RECURSE ON LEFT AND RIGHT SIDES, THEN RETURN OR
+                Expr leftOr = toNNF(((OrExpr) expr).getLeft());
+                Expr rightOr = toNNF(((OrExpr) expr).getRight());
+                return mkOR(leftOr, rightOr);
+            case IMPL:
+                // IN NNF, IMPLICATION p -> q becomes !p or q
+                System.out.println(expr);
+                Expr ant = ((ImplExpr) expr).getAntecedent();
+                System.out.println(ant);
+                Expr negAntNNF = toNNF(mkNEG(ant));
+                System.out.println(negAntNNF);
+
+                Expr cons = ((ImplExpr) expr).getConsequent();
+                System.out.println(cons);
+                Expr consNNF = toNNF(cons);
+
+                return mkOR(negAntNNF, consNNF);
+            case EQUIV:
+                // equiv p iff q becomes (!p or q) and (!q or p)
+                Expr Eqleft = ((EquivExpr) expr).getLeft();
+                Expr NNFLeft = toNNF(Eqleft);
+                Expr negLeftNNF = toNNF(mkNEG(Eqleft));
+
+                Expr Eqright = ((EquivExpr) expr).getRight();
+                Expr NNFRight = toNNF(Eqright);
+                Expr negRightNNF = toNNF(mkNEG(Eqright));
+
+                Expr newLeft = mkOR(negLeftNNF, NNFRight);
+                Expr newRight = mkOR(negRightNNF, NNFLeft);
+                return mkAND(newLeft, newRight);
+
+        }
+
+        return expr;
     }
 
     public static Expr toTseitin(Expr expr)

@@ -1,0 +1,8 @@
+FROM ubuntu:18.04
+
+WORKDIR /sat_solver
+
+COPY . .
+
+RUN apt -y update
+RUN apt -y install maven curl python3 emacs wget unzip

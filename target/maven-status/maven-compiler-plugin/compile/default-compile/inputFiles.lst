@@ -1,0 +1,16 @@
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/ast/ImplExpr.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/ast/Expr.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/ast/ExprFactory.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/target/generated-sources/antlr4/edu/utexas/cs/alr/parser/ExprBaseListener.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/target/generated-sources/antlr4/edu/utexas/cs/alr/parser/ExprParser.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/target/generated-sources/antlr4/edu/utexas/cs/alr/parser/ExprLexer.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/util/ExprUtils.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/CNFDriver.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/SATDriver.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/TseitinDriver.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/ast/VarExpr.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/ast/OrExpr.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/ast/AndExpr.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/target/generated-sources/antlr4/edu/utexas/cs/alr/parser/ExprListener.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/ast/NegExpr.java
+/media/nicholascassie/extradrive1/MCSO_Course_Work/Spring_2022/ALR/HW2/src/main/java/edu/utexas/cs/alr/ast/EquivExpr.java
