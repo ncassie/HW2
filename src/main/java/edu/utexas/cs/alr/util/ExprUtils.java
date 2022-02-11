@@ -11,6 +11,7 @@ import org.antlr.v4.runtime.tree.ParseTreeWalker;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.lang.reflect.Array;
 import java.util.*;
 
 import static edu.utexas.cs.alr.ast.ExprFactory.*;
@@ -30,9 +31,16 @@ public class ExprUtils
     public static ArrayList<Set<Long>> globalWorkingClauses = new ArrayList<>();
     public static ArrayList<Integer> satisfiedClauses = new ArrayList<>();
 
+    // key is Long representing a variable
+    // object is ArrayList of indices into globalWorkingClauses in which a variable is a watch literal
+    public static HashMap<Long, ArrayList<Integer>> watchLiterals = new HashMap<>();
+    // opposite mapping from clause index to watch literals for that clause
+    public static HashMap<Integer, ArrayList<Long>> clauseWatchLiterals = new HashMap<>();
+
     // this may need to be altered at some point to allow decision level lists
     // this keeps track of what has been assigned to true - basically unit variables
     public static HashMap<Long, Boolean> assignments = new HashMap<>();
+
 
     public static Expr toCNF(Expr expr)
     {
@@ -470,6 +478,7 @@ public class ExprUtils
     // Perform exhaustive unit resolution
     // if stop removing elements, will need to change logic here as well
     // boolean test checks to see if BCP resolves to an unSAT
+    // THIS METHOD IS BASIC/STANDARD BCP
     public static boolean performBCP(){
         int size;
         // use do/while loop to perform exhaustive resolution
@@ -506,6 +515,113 @@ public class ExprUtils
         return true;
     }
 
+    // set initial watch variables for start of analysis
+    public static void initWatchLiterals(){
+        // loop through list of clauses
+        // initialize naively at first- just get first two variables returned from iterator
+        // check if hashmap contains a list for each variable
+        // if yes, add index to list for that variable
+        // if not, create arraylist and add index into globalworkingclauses representing clause number
+        // then add hashmap listing from variable to this arraylist
+
+        for(int i = 0; i < globalWorkingClauses.size(); i++){
+            // check to make size is >1 meaning we need to create watch literals
+            Set<Long> clause = globalWorkingClauses.get(i);
+            if(clause.size() > 1){
+                // create new array list for clause->watch literal mapping
+                ArrayList<Long> clauseWatchLs = new ArrayList<>();
+                Iterator<Long> itr = clause.iterator();
+                for(int j = 0; j < 2; j++){
+                    Long var = itr.next();
+                    // add clause to list of clauses that variable is watch literal for
+                    if(watchLiterals.containsKey(var)){
+                        watchLiterals.get(var).add(i);
+                    }else{
+                        ArrayList<Integer> tmp = new ArrayList<>();
+                        tmp.add(i);
+                        watchLiterals.put(var, tmp);
+                    }
+                    // add watch literal to list for this clause
+                    clauseWatchLs.add(var);
+                }
+                clauseWatchLiterals.put(i, clauseWatchLs);
+            }
+        }
+    }
+
+    // this will check the clauses to see if we need to look for new implications
+    // based on watch literals
+    // parameter is newly assigned variable
+    public static void checkWatchLiterals(Long assignedVar){
+        // make sure -assignedVar is actually a watch literal
+        if(watchLiterals.containsKey(-assignedVar)){
+            ArrayList<Integer> watchList = watchLiterals.get(-assignedVar);
+            for(int i = 0; i < watchList.size(); i++){
+                // get clause index from watch list
+                int index = watchList.get(i);
+                //make sure clause is not already satisfied by prior assignment to true
+                if(!satisfiedClauses.contains(index)){
+                    // get clause and its iterator
+                    Set<Long> clause = globalWorkingClauses.get(index);
+                    Iterator<Long> itr = clause.iterator();
+
+                    // get watch literal list for this clause
+                    ArrayList<Long> clauseWL= clauseWatchLiterals.get(index);
+
+                    // track whether a new watch literal was found
+                    // used to see if we can make assignment of other watch literal
+                    boolean foundNewWatchVariable = false;
+
+                    // iterate through variables in clause to see if we can assign a new watch variable
+                    while(itr.hasNext()){
+                        Long currentVar = itr.next();
+                        // check if there is an unassigned variable that is not a watch variable
+                        if(!clauseWL.contains(currentVar) && !assignments.containsKey(currentVar)){
+                            // found a new variable to make a watch clause
+                            // update clause watch list
+                            clauseWL.remove(-assignedVar);
+                            clauseWL.add(currentVar);
+                            clauseWatchLiterals.put(index, clauseWL);
+
+                            // update watch list for new watch list variable
+                            if(watchLiterals.containsKey(currentVar)){
+                                watchLiterals.get(currentVar).add(index);
+                            }else{
+                                ArrayList<Integer> tmp = new ArrayList<>();
+                                tmp.add(index);
+                                watchLiterals.put(currentVar, tmp);
+                            }
+
+                            // set flag that we found new variable
+                            foundNewWatchVariable = true;
+
+                            // don't need to check any more variables because we found a new watch variable
+                            break;
+                        }
+                    }
+                    // no new watch variable was found
+                    // so we can imply new variable
+                    if(!foundNewWatchVariable){
+                        clauseWL.remove(-assignedVar);
+                        // make sure something didn't go wrong
+                        if(!clauseWL.isEmpty()){
+                            Long lastWatchLiteral = clauseWL.get(0);
+                            // what to do next? Add as an assignment or add as clause to globalWorkingClauses
+                            // probably the latter so let's start with that
+                            Set<Long> newClause = new LinkedHashSet<>();  // todo - check this to make sure linkedhashset is ok
+                            newClause.add(lastWatchLiteral);
+                            globalWorkingClauses.add(newClause);
+                            // todo : check if we mark original clause satisfied here
+                            // i think we can and it saves from having to check it again when we know it will need to be satisfied
+                            // by addition of new clause
+                            satisfiedClauses.add(index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // check's to see if all clauses have been satisfied
     // use this after running BCP
     // just need to check whether size of satisfied clauses equals size of all clauses
@@ -514,6 +630,7 @@ public class ExprUtils
         System.out.println("global working: " + globalWorkingClauses.size());
         return (satisfiedClauses.size() == globalWorkingClauses.size());
     }
+
 
     public static boolean checkSAT(Expr expr)
     {
@@ -526,9 +643,11 @@ public class ExprUtils
             getLongs(expr);
         }
 
+        // preprocess removes all clauses that contain a variable and its negation
         preprocess();
 
-
+        // LIKELY ADD HELPER FUNCTION TO DEAL WITH EVERYTHING BELOW HERE
+        // THIS WAY THAT FUNCTION CAN BE CALLED RECURSIVELY AND RETURN HERE
 
         boolean bcpCheck = performBCP();
 
@@ -546,27 +665,8 @@ public class ExprUtils
             return true;
         }
 
-
-
-
         throw new UnsupportedOperationException("implement this");
         //return true;
-    }
-
-    public static Expr parseFrom(InputStream inStream) throws IOException
-    {
-        ExprLexer lexer = new ExprLexer(CharStreams.fromStream(inStream));
-        BufferedTokenStream tokenStream = new BufferedTokenStream(lexer);
-        ExprParser parser = new ExprParser(tokenStream);
-
-        parser.addErrorListener(ThrowingErrorListener.INSTANCE);
-        lexer.addErrorListener(ThrowingErrorListener.INSTANCE);
-
-        ExprParser.ExprContext parseTree = parser.expr();
-        ASTListener astListener = new ASTListener();
-        ParseTreeWalker.DEFAULT.walk(astListener, parseTree);
-
-        return astListener.pendingExpr.pop();
     }
 
     public static void getLongs(Expr expr){
@@ -610,6 +710,8 @@ public class ExprUtils
         }
     }
 
+    // checks to see if expression is already in CNF form
+    // if so, then we don't need to do Tseitsin encoding on it
     public static boolean checkCNF(Expr expr)
     {
         Set<Set<Long>> clauses = new HashSet<>();
@@ -651,6 +753,25 @@ public class ExprUtils
 
         return true;
     }
+
+
+    public static Expr parseFrom(InputStream inStream) throws IOException
+    {
+        ExprLexer lexer = new ExprLexer(CharStreams.fromStream(inStream));
+        BufferedTokenStream tokenStream = new BufferedTokenStream(lexer);
+        ExprParser parser = new ExprParser(tokenStream);
+
+        parser.addErrorListener(ThrowingErrorListener.INSTANCE);
+        lexer.addErrorListener(ThrowingErrorListener.INSTANCE);
+
+        ExprParser.ExprContext parseTree = parser.expr();
+        ASTListener astListener = new ASTListener();
+        ParseTreeWalker.DEFAULT.walk(astListener, parseTree);
+
+        return astListener.pendingExpr.pop();
+    }
+
+
 
     public static void printDimcas(Expr expr, PrintStream out)
     {
