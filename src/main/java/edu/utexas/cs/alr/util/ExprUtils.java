@@ -4,6 +4,7 @@ import edu.utexas.cs.alr.ast.*;
 import edu.utexas.cs.alr.parser.ExprBaseListener;
 import edu.utexas.cs.alr.parser.ExprLexer;
 import edu.utexas.cs.alr.parser.ExprParser;
+import jdk.javadoc.internal.doclets.toolkit.taglets.LiteralTaglet;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
@@ -11,10 +12,57 @@ import org.antlr.v4.runtime.tree.ParseTreeWalker;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
-import java.lang.reflect.Array;
 import java.util.*;
 
 import static edu.utexas.cs.alr.ast.ExprFactory.*;
+
+class Vertex{
+
+    Long varLabel;
+    int decisionLevel;
+    int rank;
+
+    // key is clause index
+    // value is variable Label at other end
+    LinkedHashMap<Integer, Long> outEdges = new LinkedHashMap<>();
+    LinkedHashMap<Integer, Long> inEdges = new LinkedHashMap<>();
+
+    Vertex(){
+        //System.out.println("THIS IS JUST FOR TESTING");
+        // this is used for conflict node since don't need a decision level or label
+    }
+    Vertex(Long varLabel, int decisionLevel, int rank){
+        this.varLabel = varLabel;
+        this.decisionLevel = decisionLevel;
+        this.rank = rank;
+    }
+
+    Vertex(Long varLabel, int decisionLevel, Integer clauseIndex, Long parentIndex){
+        this.varLabel = varLabel;
+        this.decisionLevel = decisionLevel;
+
+        inEdges.put(clauseIndex, parentIndex);
+    }
+
+    public void addOutEdge(Integer clauseIndex, Long childIndex){
+        outEdges.put(clauseIndex, childIndex);
+    }
+
+    public void addInEdge(Integer clauseIndex, Long parentIndex){
+        inEdges.put(clauseIndex, parentIndex);
+    }
+
+    public void clear(){
+        this.inEdges.clear();
+        this.outEdges.clear();
+
+    }
+
+
+    public void sayHi(){
+        System.out.println("HI");
+    }
+}
 
 public class ExprUtils
 {
@@ -31,6 +79,8 @@ public class ExprUtils
     public static ArrayList<Set<Long>> globalWorkingClauses = new ArrayList<>();
     public static ArrayList<Integer> satisfiedClauses = new ArrayList<>();
 
+    public static LinkedHashMap<Integer, ArrayList<Integer>> satisfiedClausesByLevel = new LinkedHashMap<>();
+
     // key is Long representing a variable
     // object is ArrayList of indices into globalWorkingClauses in which a variable is a watch literal
     public static HashMap<Long, ArrayList<Integer>> watchLiterals = new HashMap<>();
@@ -40,16 +90,42 @@ public class ExprUtils
     // this may need to be altered at some point to allow decision level lists
     // this keeps track of what has been assigned to true - basically unit variables
     public static HashMap<Long, Boolean> assignments = new HashMap<>();
+    public static HashMap<Integer, LinkedHashSet<Long>> assignmentsByLevel = new HashMap<>();
+
+    public static int decisionLevel = 1;
+    // decision level/rank
+    public static Hashtable<Integer, Integer> rank = new Hashtable<>();
+    //public static HashMap<Integer, ArrayList<Long>> unitVars = new HashMap<>();
+    // try a stack for now and see if its an issue
+    public static HashMap<Integer, Stack<Long>> unitVars = new HashMap<>();
+
+    // Long = parameter assignment
+    // Vertex = node in graph
+    // use hashmap for easy access to each element
+    public static LinkedHashMap<Long, Vertex> implicationGraph = new LinkedHashMap<>();
+
+    // global conflict node so functions can easily access it
+    public static Vertex conflictNode = new Vertex();
+
+    public static Long jennyNumber = Long.valueOf(8675309);
 
 
     public static Expr toCNF(Expr expr)
     {
+        Expr testExpr = expr;
         Expr nnfExp = toNNF(expr);
-//        System.out.println("AFTER NNF TRANSFORM");
-//        System.out.println(nnfExp);
-//        System.out.println("AFTER CNF TRANSFORM");
+        while(testExpr != nnfExp){
+            testExpr = nnfExp;
+            nnfExp = toNNF(nnfExp);
+        }
+
+
+        /*System.out.println("AFTER NNF TRANSFORM");
+        System.out.println(nnfExp);
+        System.out.println("AFTER CNF TRANSFORM");
+*/
         Expr test = toCNFHelper(nnfExp);
-//        System.out.println(test);
+  //      System.out.println(test);
         //return toCNFHelper(nnfExp);
 
         test = toCNFHelper(test);
@@ -59,6 +135,7 @@ public class ExprUtils
     // method to perform CNF work;
     // we want second method so that call to toNNF does not get called unnecessarily for each recursive call to toCNF
     public static Expr toCNFHelper(Expr expr){
+        //System.out.println(expr.getKind());
 
         switch (expr.getKind()){
             // because we are already in NNF FORM, we know that both
@@ -112,6 +189,8 @@ public class ExprUtils
                             // might need to recurse again
                             Expr innerRight = ((AndExpr) orLeft).getRight();
                             Expr innerLeft = ((AndExpr) orLeft).getLeft();
+
+
 
                             Expr newLeft = toCNFHelper(mkOR(innerLeft, orRight));
                             Expr newRight = toCNFHelper(mkOR(innerRight, orRight));
@@ -244,7 +323,6 @@ public class ExprUtils
                 Expr newLeft = mkOR(negLeftNNF, NNFRight);
                 Expr newRight = mkOR(negRightNNF, NNFLeft);
                 return mkAND(newLeft, newRight);
-
         }
 
         return expr;
@@ -259,8 +337,8 @@ public class ExprUtils
         // or a negative of a var
         // so return just the expression
         if(tseitinExprs.isEmpty()){
-            System.out.println("SET IS EMPTY");
-            System.out.println(expr);
+            //System.out.println("SET IS EMPTY");
+            //System.out.println(expr);
             return expr;
         }else{
             // loop through the HashSet, get CNF of each element
@@ -300,6 +378,11 @@ public class ExprUtils
         }
     }
 
+    // goals here:
+    // create new <--> expression and add to global list
+    // return new variable created so outer recursion steps can use that version
+    // will eventually return top level variable, so toTseitin can add this to list, then prcess everything
+    // this functions just creates the <-> expressions. toTseitin will loop through them and CNF them.
     public static Expr toTseitinHelper(Expr expr){
 
         switch (expr.getKind()) {
@@ -314,67 +397,86 @@ public class ExprUtils
                     return expr;
                 }else{
                     VarExpr v1 = mkVAR(varCounter);
-                    if(firstExpr){
+                    varCounter++;
+                    // might be able to eliminate these with proper planning
+                    /*if(firstExpr){
                         tseitinExprs.add(v1);
                         firstExpr = false;
-                    }
-                    Expr tmpExpr = mkEQUIV(v1, expr);
-                    varCounter++;
+                    }*/
+                    // call tseitsinHelper on inner expression
+                    Expr innerT = toTseitinHelper(nexpr.getExpr());
+
+                    Expr tmpExpr = mkEQUIV(v1, innerT);
                     tseitinExprs.add(tmpExpr);
 
                     //System.out.println(nexpr.getExpr());
-                    Expr inner = toTseitinHelper(nexpr.getExpr());
-                    // don't know if returns are really necessary here?
-                    return inner;
+                    //Expr inner = toTseitinHelper(nexpr.getExpr());
+
+                    return v1;
                 }
             case AND:
                 VarExpr v2 = mkVAR(varCounter);
-                if(firstExpr){
+                varCounter++;
+                /*if(firstExpr){
                     tseitinExprs.add(v2);
                     firstExpr = false;
-                }
-                Expr tmpExpr = mkEQUIV(v2, expr);
-                varCounter++;
-                tseitinExprs.add(tmpExpr);
+                }*/
                 Expr left = toTseitinHelper(((AndExpr)expr).getLeft());
                 Expr right = toTseitinHelper(((AndExpr)expr).getRight());
-                return expr;
+                Expr newAnd = mkAND(left, right);
+                Expr tmpExpr = mkEQUIV(v2, newAnd);
+
+                tseitinExprs.add(tmpExpr);
+
+                return v2;
             case OR:
                 VarExpr v3 = mkVAR(varCounter);
+                varCounter++;
+                /*
                 if(firstExpr){
                     tseitinExprs.add(v3);
                     firstExpr = false;
-                }
-                Expr tmpExprOr = mkEQUIV(v3, expr);
-                varCounter++;
-                tseitinExprs.add(tmpExprOr);
+                }*/
                 Expr leftOr = toTseitinHelper(((OrExpr)expr).getLeft());
                 Expr rightOr = toTseitinHelper(((OrExpr)expr).getRight());
-                return expr;
+                Expr newOr = mkOR(leftOr, rightOr);
+                Expr tmpExprOr = mkEQUIV(v3, newOr);
+                tseitinExprs.add(tmpExprOr);
+
+                return v3;
             case IMPL:
                 VarExpr v4 = mkVAR(varCounter);
+                varCounter++;
+                /*
                 if(firstExpr){
                     tseitinExprs.add(v4);
                     firstExpr = false;
-                }
-                Expr tmpImplExpr = mkEQUIV(v4, expr);
-                varCounter++;
-                tseitinExprs.add(tmpImplExpr);
+                }*/
+
                 Expr ant = toTseitinHelper(((ImplExpr)expr).getAntecedent());
                 Expr cons = toTseitinHelper(((ImplExpr)expr).getConsequent());
-                return expr;
+                Expr newImpl = mkIMPL(ant, cons);
+
+                Expr tmpImplExpr = mkEQUIV(v4, newImpl);
+                tseitinExprs.add(tmpImplExpr);
+
+                return v4;
             case EQUIV:
                 VarExpr v5 = mkVAR(varCounter);
+                varCounter++;
+                /*
                 if(firstExpr){
                     tseitinExprs.add(v5);
                     firstExpr = false;
-                }
-                Expr tmpEquiveExpr = mkEQUIV(v5, expr);
-                varCounter++;
-                tseitinExprs.add(tmpEquiveExpr);
+                }*/
                 Expr first = toTseitinHelper(((EquivExpr)expr).getLeft());
                 Expr second = toTseitinHelper(((EquivExpr)expr).getRight());
-                return expr;
+                Expr newEquiv = mkEQUIV(first, second);
+                Expr tmpEquiveExpr = mkEQUIV(v5, newEquiv);
+
+                tseitinExprs.add(tmpEquiveExpr);
+
+                return v5;
         }
 
         return expr;
@@ -402,6 +504,7 @@ public class ExprUtils
             }
         }
 
+        /*
         System.out.println("PRINTING GLOBAL WORKING CLAUSES");
         for(Set<Long> sl : globalWorkingClauses){
             System.out.println("IN NEW OUTER SET: ");
@@ -409,7 +512,7 @@ public class ExprUtils
                 System.out.println("Long value: " + l);
             }
         }
-        System.out.println("LEAVING PREPROCESS");
+        System.out.println("LEAVING PREPROCESS");*/
 
 
     }
@@ -449,22 +552,22 @@ public class ExprUtils
 
     // gets the last unassigned variable in a clause - this represents a new unit variable
     public static long getUnitVarFromExpr(Set<Long> expr){
-        System.out.println("ENTERING GET VAR");
+        //System.out.println("ENTERING GET VAR");
 
 
         if(expr.size() == 1){
             Iterator<Long> itr = expr.iterator();
             Long l = itr.next();
-            System.out.println("RETURNING: " + l);
+          //  System.out.println("RETURNING: " + l);
             return l;
         }else{
             // get last unassigned value
             for(Long l : expr){
                 // variable does not have opposing mapping in assignments
                 // so return it
-                System.out.println("L: " + l);
+                //System.out.println("L: " + l);
                 if(!assignments.containsKey(-l)){
-                    System.out.println("RETURNING " + l);
+            //        System.out.println("RETURNING " + l);
                     return l;
                 }
             }
@@ -478,7 +581,8 @@ public class ExprUtils
     // Perform exhaustive unit resolution
     // if stop removing elements, will need to change logic here as well
     // boolean test checks to see if BCP resolves to an unSAT
-    // THIS METHOD IS BASIC/STANDARD BCP
+    // THIS METHOD IS BASIC/STANDARD BCP - so it is no longer used
+    //  new methods were created to incorporate watch literals
     public static boolean performBCP(){
         int size;
         // use do/while loop to perform exhaustive resolution
@@ -515,6 +619,53 @@ public class ExprUtils
         return true;
     }
 
+    // initial attempt at incorporating bcp with watch literals
+    // moved to a different function below
+    /*
+    public static boolean performWatchBCP(){
+        int size;
+        // use do/while loop to perform exhaustive resolution
+        // after each attempt at resolution we will check to see if the size of the
+        // resolved clauses list has changed
+        // if it has, then more resolution might be possible
+        // if not, then resolution is done
+        do{
+            size = satisfiedClauses.size();
+            for(int i = 0; i < globalWorkingClauses.size(); i++){
+                // find a unit clause
+                // First make sure clause is not already satisfied,
+                // then test if size is one or if it resolves to unit
+                Set<Long> currentExpr = globalWorkingClauses.get(i);
+
+                // current clause is satisfied so don't do any work
+                if(!satisfiedClauses.contains(i)){
+                    Long clauseSize = checkUnitSize(currentExpr);
+                    // if clauseSize == 0, then we have an unsatisfiable clause after unit resolution
+
+                    if(clauseSize == 0) {
+                        return false;
+                    } else if(currentExpr.size() == 1 || clauseSize == 1){
+
+                        // unit variable must be resolved to true - otherwise, would be unsat
+                        // we've found clauses that can be resolved
+                        // add assignment and mark unit clause as resolved
+                        Long var = getUnitVarFromExpr(currentExpr);
+                        assignments.put(var, true);
+                        satisfiedClauses.add(i);
+
+                        // restart outer loop
+                        break;
+                    }
+
+                }
+
+            }
+        } while(!(size == satisfiedClauses.size()));
+        return true;
+    }
+
+     */
+
     // set initial watch variables for start of analysis
     public static void initWatchLiterals(){
         // loop through list of clauses
@@ -525,12 +676,37 @@ public class ExprUtils
         // then add hashmap listing from variable to this arraylist
 
         for(int i = 0; i < globalWorkingClauses.size(); i++){
-            // check to make size is >1 meaning we need to create watch literals
+
             Set<Long> clause = globalWorkingClauses.get(i);
+            Iterator<Long> itr = clause.iterator();
+            // unit clause - so push to stack of unit clauses to analyze
+            if(clause.size() == 1){
+                Long unit = itr.next();
+                unitVars.get(decisionLevel).push(unit);
+                // this is only being run at start of analysis, not every run through
+                // because we know these clauses are unit length, we can add them as an assignment
+                // and mark these clauses as satisfied
+                // if later clauses conflict, then we will get an unsat because these need
+                // to be assigned as is because it is only length one
+                // B/C only doing once, can create new lists and hashtable entries
+                // following two lines are from BPC, updated for new approach using watch literals and new data structures
+                //assignments.put(unit, true);
+                //satisfiedClauses.add(i);
+                LinkedHashSet<Long> assigns = assignmentsByLevel.get(decisionLevel);
+                assigns.add(unit);
+                assignmentsByLevel.put(decisionLevel, assigns);
+                ArrayList<Integer> satClauses = satisfiedClausesByLevel.get(decisionLevel);
+                satClauses.add(i);
+                satisfiedClausesByLevel.put(decisionLevel, satClauses);
+
+                // add new vertex to implication graph for unit variables
+                implicationGraph.put(unit, new Vertex(unit, decisionLevel, rank.get(decisionLevel)));
+                rank.put(decisionLevel, rank.get(decisionLevel) + 1);
+            }
+            // size is >1 meaning we need to create watch literals
             if(clause.size() > 1){
                 // create new array list for clause->watch literal mapping
                 ArrayList<Long> clauseWatchLs = new ArrayList<>();
-                Iterator<Long> itr = clause.iterator();
                 for(int j = 0; j < 2; j++){
                     Long var = itr.next();
                     // add clause to list of clauses that variable is watch literal for
@@ -541,6 +717,7 @@ public class ExprUtils
                         tmp.add(i);
                         watchLiterals.put(var, tmp);
                     }
+
                     // add watch literal to list for this clause
                     clauseWatchLs.add(var);
                 }
@@ -552,15 +729,21 @@ public class ExprUtils
     // this will check the clauses to see if we need to look for new implications
     // based on watch literals
     // parameter is newly assigned variable
-    public static void checkWatchLiterals(Long assignedVar){
+    public static boolean checkWatchLiterals(Long assignedVar){
         // make sure -assignedVar is actually a watch literal
         if(watchLiterals.containsKey(-assignedVar)){
+            //System.out.println("IN HERE with assgined var " + assignedVar);
+            // get list of clauses that variable is watch literal for
             ArrayList<Integer> watchList = watchLiterals.get(-assignedVar);
+            //System.out.println(watchList.size());
+            // loop over clauses that variable is watch literal for
             for(int i = 0; i < watchList.size(); i++){
                 // get clause index from watch list
                 int index = watchList.get(i);
+                //System.out.println(index);
                 //make sure clause is not already satisfied by prior assignment to true
-                if(!satisfiedClauses.contains(index)){
+                if(!(satisfiedClausesByLevel.get(decisionLevel).contains(index))){
+                    //System.out.println("HERE AGAIN");
                     // get clause and its iterator
                     Set<Long> clause = globalWorkingClauses.get(index);
                     Iterator<Long> itr = clause.iterator();
@@ -575,81 +758,508 @@ public class ExprUtils
                     // iterate through variables in clause to see if we can assign a new watch variable
                     while(itr.hasNext()){
                         Long currentVar = itr.next();
+                        //System.out.println("CURRENT VARIABLE " + currentVar);
                         // check if there is an unassigned variable that is not a watch variable
-                        if(!clauseWL.contains(currentVar) && !assignments.containsKey(currentVar)){
-                            // found a new variable to make a watch clause
-                            // update clause watch list
-                            clauseWL.remove(-assignedVar);
-                            clauseWL.add(currentVar);
-                            clauseWatchLiterals.put(index, clauseWL);
+                        // need to skip over watch variable we are analyzing
+                        if(!currentVar.equals(-assignedVar)) {
+                            if(!clauseWL.contains(currentVar) && !assignmentsByLevel.get(decisionLevel).contains(currentVar)){
+                            //if (!clauseWL.contains(currentVar) && !assignments.containsKey(currentVar)) {
+                                // found a new variable to make a watch clause
+                                // update clause watch list
+                                clauseWL.remove(-assignedVar);
+                                clauseWL.add(currentVar);
+                                clauseWatchLiterals.put(index, clauseWL);
 
-                            // update watch list for new watch list variable
-                            if(watchLiterals.containsKey(currentVar)){
-                                watchLiterals.get(currentVar).add(index);
-                            }else{
-                                ArrayList<Integer> tmp = new ArrayList<>();
-                                tmp.add(index);
-                                watchLiterals.put(currentVar, tmp);
+                                // update watch list for new watch list variable
+                                if (watchLiterals.containsKey(currentVar)) {
+                                    watchLiterals.get(currentVar).add(index);
+                                } else {
+                                    ArrayList<Integer> tmp = new ArrayList<>();
+                                    tmp.add(index);
+                                    watchLiterals.put(currentVar, tmp);
+                                }
+
+                                // set flag that we found new variable
+                                //System.out.println("WE ARE ABOUT TO RETURN TRUE");
+                                foundNewWatchVariable = true;
+
+                                // don't need to check any more variables for this clause because we found a new watch variable
+                                break;
                             }
-
-                            // set flag that we found new variable
-                            foundNewWatchVariable = true;
-
-                            // don't need to check any more variables because we found a new watch variable
-                            break;
                         }
                     }
-                    // no new watch variable was found
-                    // so we can imply new variable
+                    // no new watch variable was found, so analyze existing watch variable
                     if(!foundNewWatchVariable){
                         clauseWL.remove(-assignedVar);
-                        // make sure something didn't go wrong
-                        if(!clauseWL.isEmpty()){
+                        // testing on variable 1 because it wasd giving me issues
+                        /*
+                        if(assignedVar.equals(Long.valueOf(1))){
+                            System.out.println("IMPLYING NE");
+                        }*/
+                        // If we don't have a second watch variable, something went wrong
+                        if(clauseWL.isEmpty()){
+                            return false;
+                        } else{
                             Long lastWatchLiteral = clauseWL.get(0);
-                            // what to do next? Add as an assignment or add as clause to globalWorkingClauses
-                            // probably the latter so let's start with that
-                            Set<Long> newClause = new LinkedHashSet<>();  // todo - check this to make sure linkedhashset is ok
-                            newClause.add(lastWatchLiteral);
-                            globalWorkingClauses.add(newClause);
-                            // todo : check if we mark original clause satisfied here
-                            // i think we can and it saves from having to check it again when we know it will need to be satisfied
-                            // by addition of new clause
-                            satisfiedClauses.add(index);
+                            //System.out.println("Last watch literal for clause:" + lastWatchLiteral);
+
+                            // check if variable is already assigned
+                            // if so, this is fine b/c could be assigned but not processed yet
+                            if(assignmentsByLevel.get(decisionLevel).contains(lastWatchLiteral)){
+                                // todo - decide if need to check if added as a unit var
+                                // TODO - DOUBLE CHECK THAT THESE SHOULD BE -assignedVar here
+                                // test should be true, but do it so we don't throw an exception if it doesn't
+                                // incoming edge to child/ new implied variable
+                                if(implicationGraph.containsKey(lastWatchLiteral)){
+                                    //implicationGraph.get(lastWatchLiteral).addInEdge(index, -assignedVar);
+                                    // actual assignment caused this implication, so needs to be assignedVar, not -assignedVar
+                                    implicationGraph.get(lastWatchLiteral).addInEdge(index, assignedVar);
+                                }
+                                // outgoing edge from -watchVariable
+                                // same note as above - needs to be assignedVar, not -assignedVar because assigneVar
+                                // was the assignment that caused this implication
+                                if(implicationGraph.containsKey(assignedVar)){
+                                    implicationGraph.get(assignedVar).addOutEdge(index, lastWatchLiteral);
+                                }
+                                // Don't want to return true here because it will stop processing other clauses
+                                // that use this as a watch literal - only want to return true in this function at very end
+                                //return true;
+                            } else if(assignmentsByLevel.get(decisionLevel).contains(-lastWatchLiteral)){
+                                // this is a conflict so return false
+                                // add edge with this clause into conflict node - this clause is conflicting
+                                // TODO - MIGHT NEED TO ADD ADDITIONAL EDGES INTO CONFLICT NODE
+                                // TODO - NOT SURE, BECAUSE WE WILL PROCESS ENTIRE CLAUSE THAT LED HERE
+                                conflictNode.clear();
+                                conflictNode.addInEdge(index, lastWatchLiteral);
+
+                                //System.out.println("RETURNING A CONFLICT");
+
+                                /*Vertex v = implicationGraph.get(-lastWatchLiteral);
+                                Integer conflictEdge = v.inEdges.entrySet().iterator().next().getKey();
+                                conflictNode.addInEdge(conflictEdge, -lastWatchLiteral); */
+                                // we found a conflict, so don't need to process any more clauses containing -var as a watch literal
+                                // because we need to adjust assignments to satisfy this conflict
+                                return false;
+                            } else{
+                                // THIS IS A NEW IMPLIED ASSIGNMENT
+                                assignmentsByLevel.get(decisionLevel).add(lastWatchLiteral);
+                                // make sure this is all correct
+                                satisfiedClausesByLevel.get(decisionLevel).add(index);
+                                unitVars.get(decisionLevel).push(lastWatchLiteral);
+                                Vertex v = new Vertex(lastWatchLiteral, decisionLevel, rank.get(decisionLevel));
+                                rank.put(decisionLevel, rank.get(decisionLevel) + 1);
+                                // IN EDGE SHOULD BE ASSIGNED VAR, NOT -ASSIGNEDVAR BECAUSE ASSIGNMENT CAUSED IMPLICATION
+                                v.addInEdge(index, assignedVar);
+                                implicationGraph.put(lastWatchLiteral, v);
+                                if(implicationGraph.containsKey(assignedVar)){
+                                    implicationGraph.get(assignedVar).addOutEdge(index, lastWatchLiteral);
+                                }
+                                //return true;
+                            }
                         }
                     }
                 }
             }
         }
+        // got through everything ok, so return true
+        return true;
     }
 
     // check's to see if all clauses have been satisfied
     // use this after running BCP
     // just need to check whether size of satisfied clauses equals size of all clauses
     public static boolean checkAllClauses(){
-        System.out.println("satisfied: " + satisfiedClauses.size());
-        System.out.println("global working: " + globalWorkingClauses.size());
+        //System.out.println("satisfied: " + satisfiedClauses.size());
+        //System.out.println("global working: " + globalWorkingClauses.size());
         return (satisfiedClauses.size() == globalWorkingClauses.size());
     }
 
+    public static Long getNewAssignment(){
+        for(Long l : globalVars){
+            // if variable and its negation are both not assigned, then can use as assignment
 
+            if(!assignmentsByLevel.get(decisionLevel).contains(l) && !assignmentsByLevel.get(decisionLevel).contains(-l)){
+                return l;
+            }
+        }
+
+        // if we return this, then we have no new assignments to make
+        return jennyNumber;
+    }
+
+    // copies previous level up to new decision level
+    // this lets us add to new decision level
+    // then revert back to older decision levels easily
+    public static void increaseLevel(){
+        int tmpLevel = decisionLevel + 1;
+        LinkedHashSet<Long> tmpABL = new LinkedHashSet<>();
+        tmpABL.addAll(assignmentsByLevel.get(decisionLevel));
+        assignmentsByLevel.put(tmpLevel, tmpABL);
+
+        Stack<Long> tmpStack = new Stack<>();
+        tmpStack.addAll(unitVars.get(decisionLevel));
+        unitVars.put(tmpLevel, tmpStack);
+
+        ArrayList<Integer> tmpSatisfied = new ArrayList<>();
+        tmpSatisfied.addAll(satisfiedClausesByLevel.get(decisionLevel));
+        satisfiedClausesByLevel.put(tmpLevel, tmpSatisfied);
+    }
+
+    // helper method to revert back to earlier level
+    // removes all decisions made between new, lower level and current level
+    public static void revertToLowerLevel(Integer newLevel){
+        for(int i = newLevel + 1; i <= decisionLevel; i++){
+            assignmentsByLevel.remove(i);
+            unitVars.remove(i);
+            satisfiedClausesByLevel.remove(i);
+        }
+        decisionLevel = newLevel;
+    }
+
+    // method to find UIP based on conflict clause
+    public static Long findUIP(){
+        // get actual conflict clause
+        Integer conflictIndex = conflictNode.inEdges.entrySet().iterator().next().getKey();
+        Set<Long> clause = globalWorkingClauses.get(conflictIndex);
+
+        /*for(Long l : clause){
+            System.out.println(l);
+        }*/
+
+        // find variables in last clause assigned at current decision level
+        ArrayList<Long> lastVars = new ArrayList<>();
+
+        /*System.out.println("Implication graph size " + implicationGraph.size());
+        Set<Long> ks = implicationGraph.keySet();
+        for(Long ky : ks){
+            System.out.println(ky);
+        }*/
+        for(Long var : clause){
+            //System.out.println("Decision level, var " + decisionLevel + " " + var);
+            // updated conflict node instead of creating node for variable, so need to check for this
+            if(implicationGraph.containsKey(-var)){
+                //System.out.println("Var was in graph " + var);
+                if(implicationGraph.get(-var).decisionLevel == decisionLevel){
+                    lastVars.add(-var);
+                }
+            }
+        }
+
+        /* if(lastVars.size() == 1){
+            //figure out what to do here
+            System.out.println("OK, NEED TO FIGURE THIS OUT");
+            return jennyNumber;
+        }else{ */
+            do{
+                // remove highest rank variable
+                // replace with all parents if they have same decision level
+                int testRank = -1;
+                Long lastVar = jennyNumber;
+
+                // find variable with highest rank
+                for(int i = 0; i < lastVars.size(); i++) {
+                    System.out.println(lastVars.get(i));
+                    Vertex v = implicationGraph.get(lastVars.get(i));
+                    if (v.rank > testRank){
+                        testRank = v.rank;
+                        lastVar = lastVars.get(i);
+                    }
+                }
+
+                // loop through parents and add all parents with same decision level
+                Vertex v = implicationGraph.get(lastVar);
+                //System.out.println(v.decisionLevel);
+                Set<Integer> keys = v.inEdges.keySet();
+                // keys are clauses labeling incoming edge
+                // values associated with key is variable on other end if I need it
+                for(Integer key : keys){
+                    //System.out.println(key);
+                    Long p = v.inEdges.get(key);
+                    Vertex parent = implicationGraph.get(p);
+                    if(parent.decisionLevel == decisionLevel){
+                        lastVars.add(p);
+                    }
+                }
+                if(lastVars.size() > 1){
+                    lastVars.remove(lastVar);
+                }
+
+            }while(lastVars.size() > 1);
+        // }
+        return lastVars.get(0);
+    }
+
+    // funtion to test whether negation of UIP is only literal at current decision level
+    // in a new conflict clause
+    public static boolean testUIPCondition(Long negUIP, Set<Long> conflictClause){
+        // if negation of UIP isn't in conflict clause yet, test fails
+        if(!conflictClause.contains(negUIP)){
+            return false;
+        }else{
+            // loop through variables and if variable other than negUIP is at current decision level,
+            // test fails
+            for(Long var : conflictClause){
+                // don't need to consider negUIP
+                if(!var.equals(negUIP)){
+                    if(implicationGraph.get(var).decisionLevel == decisionLevel){
+                        return false;
+                    }
+                }
+            }
+        }
+        // two tests passed, so return true
+        return true;
+    }
+
+    public static Set<Long> resolveTwoClauses(Set<Long> c1, Set<Long> c2){
+        //Set<Long> newSet = new LinkedHashSet<>();
+        // can use c1 because we are passing a clean set so don't need to worry about altering c1
+        //newSet.addAll(c1);
+        for(Long var : c2){
+            // each clause contains an opposing literal - so resolve by removing
+            if(c1.contains(-var)){
+                c1.remove(-var);
+            }else{
+                // otherwise add to set
+                // because its a set, if variable is added a second time, it won't be duplicated
+                c1.add(var);
+            }
+        }
+        return c1;
+    }
+
+    // method to analyze conflict based on UIP
+    // find a new conflict clause once we know we have a conflict and adds to list of clauses
+    // returns new decision level to backtrack to
+    public static Integer analyzeConflict(Long UIP){
+        Long negatedUIP = -UIP;
+        System.out.println("UIP: " + UIP);
+        // get conflict clause index
+        Integer conflictIndex = conflictNode.inEdges.entrySet().iterator().next().getKey();
+        Set<Long> clause = globalWorkingClauses.get(conflictIndex);
+
+        // find variables in last clause assigned at current decision level
+        ArrayList<Long> lastVars = new ArrayList<>();
+
+        for(Long var : clause){
+            if(implicationGraph.containsKey(-var)){
+                if(implicationGraph.get(-var).decisionLevel == decisionLevel){
+                    lastVars.add(-var);
+                }
+            }
+
+        }
+        // NEED TO DEAL WITH THIS ON THE OTHER END!
+        //System.out.println("LAST VARS SIZE " + lastVars.size());
+        if(lastVars.size() == 1 && lastVars.get(0).equals(UIP)){
+            Set<Long> tmp = new LinkedHashSet<>();
+            tmp.add(-UIP);
+            return -10;
+        }
+        Set<Long> testSet = new LinkedHashSet<>();
+        testSet.addAll(clause);
+        boolean testFlag = false;
+        while(true){
+            // this loops over all edges coming into conflict clause initially
+            // will add successive ancestors to it if we don't resolve uip condition
+            //System.out.println("STUCK IN CONFLICT ANALYSIS LOOP");
+            for(Long var : lastVars){
+               // System.out.println(var);
+                Vertex v = implicationGraph.get(var);
+                Set<Integer> keys = v.inEdges.keySet();
+
+                // keys are clauses labeling incoming edge
+                // values associated with key is variable on other end if I need it
+                for(Integer key : keys){
+                    Set<Long> c2 = globalWorkingClauses.get(key);
+                    testSet = resolveTwoClauses(testSet, c2);
+                    if(testUIPCondition(negatedUIP, testSet)){
+                        testFlag = true;
+                        break;
+                    }else{
+                        // didn't satisfy our condition, so add parent for processing?
+                        lastVars.add(v.inEdges.get(key));
+                    }
+                }
+                if(testFlag){
+                    break;
+                }
+            }
+            if(testFlag){
+                break;
+            }
+        }
+        // add new conflict clause to our global set of clauses
+        globalWorkingClauses.add(testSet);
+
+        if(testSet.size() == 1){
+            return 1;
+        } else{
+            int firstMax = -1;
+            int secondMax = -1;
+            for(Long var : testSet){
+                int dl = implicationGraph.get(var).decisionLevel;
+                if (dl > firstMax){
+                    secondMax = firstMax;
+                    firstMax = dl;
+                } else if (dl > secondMax){
+                    secondMax = dl;
+                }
+            }
+            return secondMax;
+        }
+    }
+
+    public static boolean checkSATHelper(){
+        /* CDCL process:
+            First DPLL
+                1. Run BCP
+                    1a. CDCL - extends this to use watch literals
+                    1b. CDCL - extends using implication graph to analyze conflict
+                2. Run PLP (If only positive then set to true, if only negative, set to false)
+                3. if(PLP) returns TRUE/SAT, then return SAT
+                4. if (PLP) return false/unsat then return unsat
+                5. choose variable at random
+                6. if dpll on variable is true, return sat
+                7. else, return dpll of variable set to false
+         */
+
+        // run BCP using watch literals
+        // need to figure out how to do this exhaustively - doing it for every variable in
+        // our unit list, so this should be exhaustive as new variables get added to list as we go through process
+        // USE INFINITE LOOP TO CONTINUE PROCESS FOR NOW
+        // CAN ADJUST IF PROPER BREAK CONDITIONS LEAD TO GOOD TEST STATEMENT
+        while(true){
+            // check all of our current unit vars to see if any more assignments can be made
+            // this is basically the bcp process
+            while(!unitVars.get(decisionLevel).isEmpty()){
+                //System.out.println("STUCK IN INNER LOOP decisionLevel + stack size "  + decisionLevel + " " +  unitVars.get(decisionLevel).size());
+                Long var = unitVars.get(decisionLevel).pop();
+                //System.out.println("VAR ANALYZE: " + var);
+                //System.out.println(var);
+                boolean check = checkWatchLiterals(var);
+                //System.out.println(check);
+                // checkWatchLiterals returned false so we know we have a conflict
+                if(!check){
+                    //System.out.println("ARE WE HAVING FAILING CHECK");
+                    // if conflict is at decision level 1, then we know equation is unsat
+                    if(decisionLevel == 1){
+                        return false;
+                    } else{
+                        // we have a conflict at a level higher than our first level
+                        // so find the first UIP
+                        // then analyze conflict to find new conflict clause and get new decision level
+                        // revert trackers to back-tracked decision level
+                        // then make new assignment/ begin processing based on new assignment from backtracking
+                        Long uip = findUIP();
+                        int newDecisionLevel = analyzeConflict(uip);
+                        // this means our current assignment was bad
+                        if(newDecisionLevel == -10){
+
+                        }
+                        revertToLowerLevel(newDecisionLevel);
+
+                        // new conflict clause is last item in globalClauses
+                        Set<Long> conflictClause = globalWorkingClauses.get(globalWorkingClauses.size()-1);
+                        unitVars.get(decisionLevel).push(getUnitVarFromExpr(conflictClause));
+
+                    }
+                }
+                // no conflict, so proceed to the next unitVar in our list and process that
+            }
+            if(checkAllClauses()){
+                return true;
+            }else{
+                // Process has exhausted implied assignments, so increase decision level and make new assignment
+                increaseLevel();
+                decisionLevel++;
+                rank.put(decisionLevel, 0);
+                Long varAssign = getNewAssignment();
+                if(varAssign == jennyNumber){
+                    // can't make new assignment and haven't satisfied all clauses, so check level?
+                    //System.out.println("867 was a var assign");
+                    return true;
+                }else{
+                    assignmentsByLevel.get(decisionLevel).add(varAssign);
+                }
+                implicationGraph.put(varAssign, new Vertex(varAssign, decisionLevel, rank.get(decisionLevel)));
+                rank.put(decisionLevel, rank.get(decisionLevel) + 1);
+                //System.out.println("VARIABLE ASSIGNMENT " + varAssign);
+                // push new assignment for analysis in next round of loop
+                // NOTE - unitVars is a bad name for this variable
+                unitVars.get(decisionLevel).push(varAssign);
+                // TODO - NEED TO MARK ALL CLAUSES CONTAINING THIS VARIABLE AS SATISFIED!
+                // TODO - FIND A BETTER WAY TO DO THIS - PROBABLY NEED A HASHTABLE OF VAR->CLAUSES THAT WE CAN ACCESS
+                for(int k = 0; k < globalWorkingClauses.size(); k++){
+                    if(globalWorkingClauses.get(k).contains(varAssign)){
+                        satisfiedClausesByLevel.get(decisionLevel).add(k);
+                    }
+                }
+            }
+        }
+
+        //return true;
+    }
+
+    // use a helper function so that toTseitin processing doesn't continually happen if recursion is used
     public static boolean checkSAT(Expr expr)
     {
+        Stack<Long> firstLevelUnits = new Stack<>();
+        unitVars.put(decisionLevel, firstLevelUnits);
+        LinkedHashSet<Long> firstAssigns = new LinkedHashSet<>();
+        assignmentsByLevel.put(decisionLevel, firstAssigns);
+        ArrayList<Integer> firstSat = new ArrayList<>();
+        satisfiedClausesByLevel.put(decisionLevel, firstSat);
+        rank.put(decisionLevel, 0);
+
         // check if expr is already in CNF
         // if so, don't need to do Tseitin
+        /*
         if(!checkCNF(expr)){
+            System.out.println("STARTING TOSEITIN");
             Expr e = toTseitin(expr);
         }else{
-            System.out.println("ALREADY IN CNF");
+            //System.out.println("ALREADY IN CNF");
             getLongs(expr);
         }
 
+        System.out.println("FINISHED TOSEITIN");
+        */
         // preprocess removes all clauses that contain a variable and its negation
         preprocess();
 
-        // LIKELY ADD HELPER FUNCTION TO DEAL WITH EVERYTHING BELOW HERE
-        // THIS WAY THAT FUNCTION CAN BE CALLED RECURSIVELY AND RETURN HERE
+        //System.out.println(globalWorkingClauses.size());
 
-        boolean bcpCheck = performBCP();
+        initWatchLiterals();
+
+        //System.out.println("ABOUT TO START THE REAL WORK");
+
+        // key is Long representing a variable
+        // object is ArrayList of indices into globalWorkingClauses in which a variable is a watch literal
+
+
+        //public static HashMap<Integer, ArrayList<Long>> clauseWatchLiterals = new HashMap<>();
+        /*Set<Integer> keys = clauseWatchLiterals.keySet();
+        for(Integer key : keys){
+            System.out.println("Cluase index: " + key);
+            ArrayList<Long> tmp = clauseWatchLiterals.get(key);
+            for(int i = 0; i < tmp.size(); i++){
+                System.out.println(tmp.get(i));
+            }
+        }*/
+
+        // break this into two statements in case we want to do testing after checkSATHELPER runs
+        boolean satTest = checkSATHelper();
+
+        return satTest;
+
+
+
+
+        //boolean bcpCheck = performBCP();
+        /* BELOW IS ALL JUST FOR TESTING
+        Vertex n = new Vertex();
+        n.sayHi();
 
         for(int i = 0; i < satisfiedClauses.size(); i++){
             System.out.println(satisfiedClauses.get(i));
@@ -659,13 +1269,14 @@ public class ExprUtils
             System.out.println(key);
         }
 
+
         if(!bcpCheck){
             return false;
         } else if(checkAllClauses()){
             return true;
-        }
+        }*/
 
-        throw new UnsupportedOperationException("implement this");
+        // throw new UnsupportedOperationException("implement this");
         //return true;
     }
 
@@ -885,6 +1496,7 @@ public class ExprUtils
         return literals;
     }
 }
+
 
 class ASTListener extends ExprBaseListener
 {
