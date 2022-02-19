@@ -112,12 +112,14 @@ public class ExprUtils
 
     public static Expr toCNF(Expr expr)
     {
-        Expr testExpr = expr;
+        //System.out.println("TO CNF BEING CALLED");
+        Expr testExpr;
         Expr nnfExp = toNNF(expr);
-        while(testExpr != nnfExp){
+        do{
+        //    System.out.println("IN OUTER LOOP");
             testExpr = nnfExp;
             nnfExp = toNNF(nnfExp);
-        }
+        } while(testExpr != nnfExp);
 
 
         /*System.out.println("AFTER NNF TRANSFORM");
@@ -135,6 +137,7 @@ public class ExprUtils
     // method to perform CNF work;
     // we want second method so that call to toNNF does not get called unnecessarily for each recursive call to toCNF
     public static Expr toCNFHelper(Expr expr){
+        //System.out.println("CNF HELPER BEING CALLED");
         //System.out.println(expr.getKind());
 
         switch (expr.getKind()){
@@ -236,7 +239,7 @@ public class ExprUtils
     }
 
     public static Expr toNNF(Expr expr) {
-
+        //System.out.println("NNF CALLED FOR EXP: " + expr);
         Expr.ExprKind ek = expr.getKind();
         switch (ek)
         {
@@ -320,8 +323,8 @@ public class ExprUtils
                 Expr NNFRight = toNNF(Eqright);
                 Expr negRightNNF = toNNF(mkNEG(Eqright));
 
-                Expr newLeft = mkOR(negLeftNNF, NNFRight);
-                Expr newRight = mkOR(negRightNNF, NNFLeft);
+                Expr newLeft = toNNF(mkOR(negLeftNNF, NNFRight));
+                Expr newRight = toNNF(mkOR(negRightNNF, NNFLeft));
                 return mkAND(newLeft, newRight);
         }
 
@@ -332,6 +335,7 @@ public class ExprUtils
     {
         // convert to tseitin form:
         Expr converted = toTseitinHelper(expr);
+        tseitinExprs.add(converted);
 
         // this means that the expr is either a var
         // or a negative of a var
@@ -359,7 +363,16 @@ public class ExprUtils
             return first;*/
             // convert tseitin's to cnf:
             for(Expr exp : tseitinExprs) {
+                Expr tmp;
                 Expr c = toCNF(exp);
+                do{
+                    tmp = c;
+                    c = toCNF(c);
+                }while(tmp != c);
+
+
+
+                //System.out.println(c);
                 getLongs(c);
                 //System.out.println(c);
                 //CNFExprs.add(toCNF(exp));
@@ -869,9 +882,10 @@ public class ExprUtils
     // use this after running BCP
     // just need to check whether size of satisfied clauses equals size of all clauses
     public static boolean checkAllClauses(){
-        //System.out.println("satisfied: " + satisfiedClauses.size());
+        //System.out.println("satisfied: " + satisfiedClausesByLevel.get(decisionLevel).size());
         //System.out.println("global working: " + globalWorkingClauses.size());
-        return (satisfiedClauses.size() == globalWorkingClauses.size());
+        return satisfiedClausesByLevel.get(decisionLevel).size() == globalWorkingClauses.size();
+        //return (satisfiedClauses.size() == globalWorkingClauses.size());
     }
 
     public static Long getNewAssignment(){
@@ -1168,6 +1182,7 @@ public class ExprUtils
                 // no conflict, so proceed to the next unitVar in our list and process that
             }
             if(checkAllClauses()){
+                //System.out.println("Returning true after check all clauses");
                 return true;
             }else{
                 // Process has exhausted implied assignments, so increase decision level and make new assignment
@@ -1214,17 +1229,20 @@ public class ExprUtils
 
         // check if expr is already in CNF
         // if so, don't need to do Tseitin
-        /*
+/*
         if(!checkCNF(expr)){
-            System.out.println("STARTING TOSEITIN");
+            System.out.println("Line 1233 : TOSEITIN being called");
             Expr e = toTseitin(expr);
         }else{
-            //System.out.println("ALREADY IN CNF");
+            System.out.println("ALREADY IN CNF");
             getLongs(expr);
-        }
+        }*/
 
-        System.out.println("FINISHED TOSEITIN");
-        */
+        Expr e = toTseitin(expr);
+        //getLongs(expr);
+
+        //System.out.println("FINISHED TOSEITIN");
+
         // preprocess removes all clauses that contain a variable and its negation
         preprocess();
 
@@ -1252,9 +1270,6 @@ public class ExprUtils
         boolean satTest = checkSATHelper();
 
         return satTest;
-
-
-
 
         //boolean bcpCheck = performBCP();
         /* BELOW IS ALL JUST FOR TESTING
@@ -1313,6 +1328,7 @@ public class ExprUtils
                     globalVars.add(varExpr.getId());
                     break;
                 case OR:
+                    //System.out.println(e);
                     globalClauses.add(getLiteralsForClause((OrExpr) e, globalVars));
                     break;
                 default:
